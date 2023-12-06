@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,12 +18,13 @@ func main() {
 	var processes []*os.Process
 	var processesMutex sync.Mutex
 
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+	signalCh := make(chan os.Signal, 2)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
+	// Cleanup goroutine
 	go func() {
 		<-signalCh
-		fmt.Println("\nReceived interrupt signal. Cleaning up...")
+		log.Println("Cleaning up...")
 		processesMutex.Lock()
 		for _, proc := range processes {
 			fmt.Printf("terminating process: %v\n", proc.Pid)
@@ -35,12 +37,14 @@ func main() {
 		wg.Wait()
 		os.Exit(0)
 	}()
+
 	for _, arg := range os.Args[1:] {
 		fields := strings.Fields(arg)
 		cmd := exec.Command(fields[0], fields[1:]...)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			log.Println("Error creating StdoutPipe:", err)
+			signalCh <- syscall.SIGINT
 			return
 		}
 		cmd.Stderr = os.Stderr
@@ -52,7 +56,9 @@ func main() {
 			err := cmd.Start()
 			if err != nil {
 				log.Println("Error starting command:", err)
+				signalCh <- syscall.SIGINT
 				return
+
 			}
 			processesMutex.Lock()
 			processes = append(processes, cmd.Process)
@@ -62,10 +68,23 @@ func main() {
 
 			err = cmd.Wait()
 			if err != nil {
-				log.Println("Error waiting for command:", err)
+				if !isInterrupt(err) {
+					log.Println("Error waiting for command:", err)
+					signalCh <- syscall.SIGINT
+					return
+
+				}
 			}
 		}()
 	}
 	wg.Wait()
-
+}
+func isInterrupt(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+			return status.Signal() == os.Interrupt
+		}
+	}
+	return false
 }
