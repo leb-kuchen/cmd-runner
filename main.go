@@ -40,7 +40,8 @@ func main() {
 		cmd := exec.Command(fields[0], fields[1:]...)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			log.Panicln("Error creating StdoutPipe:", err)
+			log.Println("Error creating StdoutPipe:", err)
+			return
 		}
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -50,7 +51,8 @@ func main() {
 			defer wg.Done()
 			err := cmd.Start()
 			if err != nil {
-				log.Panicln("Error starting command:", err)
+				log.Println("Error starting command:", err)
+				return
 			}
 			processesMutex.Lock()
 			processes = append(processes, cmd.Process)
