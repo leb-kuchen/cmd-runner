@@ -43,9 +43,9 @@ func main() {
 		cmd := exec.Command(fields[0], fields[1:]...)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			log.Println("Error creating StdoutPipe:", err)
+			log.Println("Error creating StdoutPipe:", err.Error())
 			signalCh <- syscall.SIGINT
-			return
+			select {}
 		}
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -55,23 +55,25 @@ func main() {
 			defer wg.Done()
 			err := cmd.Start()
 			if err != nil {
-				log.Println("Error starting command:", err)
+				log.Println("Error starting command:", err.Error())
 				signalCh <- syscall.SIGINT
-				return
-
+				select {}
 			}
 			processesMutex.Lock()
 			processes = append(processes, cmd.Process)
 			processesMutex.Unlock()
 
-			io.Copy(os.Stdout, stdout)
+			_, err = io.Copy(os.Stdout, stdout)
+			if err != nil {
+				log.Println("Error copying output to Stdout", err.Error())
+			}
 
 			err = cmd.Wait()
 			if err != nil {
 				if !isInterrupt(err) {
 					log.Println("Error waiting for command:", err)
 					signalCh <- syscall.SIGINT
-					return
+					select {}
 
 				}
 			}
