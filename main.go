@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 )
 
@@ -19,7 +19,6 @@ func main() {
 		wg             sync.WaitGroup
 		processes      []*os.Process
 		processesMutex sync.Mutex
-		errFound       atomic.Bool
 	)
 	signalCh := make(chan os.Signal, 3)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -75,12 +74,9 @@ func main() {
 			if err != nil {
 				log.Println("encountered an error -> exiting:", err)
 				signalCh <- syscall.SIGTERM
-				errFound.Store(true)
+				runtime.Gosched()
 			}
 		}(arg)
-		if errFound.Load() {
-			continue
-		}
 	}
 	wg.Wait()
 }
