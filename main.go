@@ -21,7 +21,6 @@ func main() {
 		processesMutex sync.Mutex
 		errFound       atomic.Bool
 	)
-	errFound.Store(false)
 	signalCh := make(chan os.Signal, 3)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
