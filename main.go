@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,7 +28,7 @@ func main() {
 
 	// Cleanup goroutine
 	go func() {
-		<-signalCh
+
 		log.Println("Cleaning up...")
 		processesMutex.Lock()
 		for _, proc := range processes {
@@ -80,16 +79,11 @@ func main() {
 			if err != nil {
 				log.Println("encountered an error -> exiting:", err)
 				signalCh <- syscall.SIGTERM
-				errFound.Store(true)
 			}
 		}(arg)
-		wg.Wait()
+
 	}
-	if errFound.Load() {
-		for {
-			runtime.Gosched()
-		}
-	}
+	wg.Wait()
 }
 func isInterrupt(err error) bool {
 	var exitErr *exec.ExitError
