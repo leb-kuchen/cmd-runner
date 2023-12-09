@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 )
 
@@ -19,16 +18,17 @@ func main() {
 		wg             sync.WaitGroup
 		processes      []*os.Process
 		processesMutex sync.Mutex
-		errFound       atomic.Bool
+		cleanupWg      sync.WaitGroup
 	)
-	errFound.Store(false)
 
 	signalCh := make(chan os.Signal, 2)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	// Cleanup goroutine
+	cleanupWg.Add(1)
 	go func() {
-
+		defer cleanupWg.Done()
+		<-signalCh
 		log.Println("Cleaning up...")
 		processesMutex.Lock()
 		for _, proc := range processes {
@@ -60,7 +60,6 @@ func main() {
 
 				if err := cmd.Start(); err != nil {
 					return fmt.Errorf("error starting command: %w", err)
-
 				}
 				processesMutex.Lock()
 				processes = append(processes, cmd.Process)
@@ -72,7 +71,6 @@ func main() {
 
 				if err := cmd.Wait(); err != nil && !isInterrupt(err) {
 					return fmt.Errorf("error waiting for command: %w", err)
-
 				}
 				return nil
 			}()
@@ -84,6 +82,8 @@ func main() {
 
 	}
 	wg.Wait()
+	signalCh <- syscall.SIGTERM
+	cleanupWg.Wait()
 }
 func isInterrupt(err error) bool {
 	var exitErr *exec.ExitError
