@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -18,16 +19,14 @@ func main() {
 		wg             sync.WaitGroup
 		processes      []*os.Process
 		processesMutex sync.Mutex
-		cleanupWg      sync.WaitGroup
+		errFound       atomic.Bool
 	)
-
-	signalCh := make(chan os.Signal, 2)
+	errFound.Store(false)
+	signalCh := make(chan os.Signal, 3)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	// Cleanup goroutine
-	cleanupWg.Add(1)
 	go func() {
-		defer cleanupWg.Done()
 		<-signalCh
 		log.Println("Cleaning up...")
 		processesMutex.Lock()
@@ -77,13 +76,14 @@ func main() {
 			if err != nil {
 				log.Println("encountered an error -> exiting:", err)
 				signalCh <- syscall.SIGTERM
+				errFound.Store(true)
 			}
 		}(arg)
-
+		if errFound.Load() {
+			continue
+		}
 	}
 	wg.Wait()
-	signalCh <- syscall.SIGTERM
-	cleanupWg.Wait()
 }
 func isInterrupt(err error) bool {
 	var exitErr *exec.ExitError
