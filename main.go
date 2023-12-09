@@ -63,7 +63,7 @@ func main() {
 				processes = append(processes, cmd.Process)
 				processesMutex.Unlock()
 
-				if _, err = io.Copy(os.Stdout, stdout); err != nil && !errors.Is(err, io.EOF) {
+				if _, err := io.Copy(os.Stdout, stdout); err != nil && !errors.Is(err, io.EOF) {
 					return fmt.Errorf("error copying output to Stdout: %w", err)
 				}
 
