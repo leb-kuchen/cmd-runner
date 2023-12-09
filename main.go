@@ -8,15 +8,21 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
 func main() {
-	var wg sync.WaitGroup
-	var processes []*os.Process
-	var processesMutex sync.Mutex
+	var (
+		wg             sync.WaitGroup
+		processes      []*os.Process
+		processesMutex sync.Mutex
+		errFound       atomic.Bool
+	)
+	errFound.Store(false)
 
 	signalCh := make(chan os.Signal, 2)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -27,7 +33,7 @@ func main() {
 		log.Println("Cleaning up...")
 		processesMutex.Lock()
 		for _, proc := range processes {
-			fmt.Printf("terminating process: %v\n", proc.Pid)
+			log.Printf("terminating process: %v\n", proc.Pid)
 			err := proc.Signal(syscall.SIGTERM)
 			if err != nil {
 				log.Printf("Error terminating process: %v\n", err)
@@ -39,47 +45,51 @@ func main() {
 	}()
 
 	for _, arg := range os.Args[1:] {
-		fields := strings.Fields(arg)
-		cmd := exec.Command(fields[0], fields[1:]...)
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			log.Println("Error creating StdoutPipe:", err.Error())
-			signalCh <- syscall.SIGINT
-			select {}
-		}
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
+		arg := arg
 		wg.Add(1)
-
-		go func() {
+		go func(arg string) {
 			defer wg.Done()
-			err := cmd.Start()
-			if err != nil {
-				log.Println("Error starting command:", err.Error())
-				signalCh <- syscall.SIGINT
-				select {}
-			}
-			processesMutex.Lock()
-			processes = append(processes, cmd.Process)
-			processesMutex.Unlock()
+			err := func() error {
+				fields := strings.Fields(arg)
+				cmd := exec.Command(fields[0], fields[1:]...)
+				stdout, err := cmd.StdoutPipe()
+				if err != nil {
+					return fmt.Errorf("error creating StdoutPipe: %w", err)
+				}
+				cmd.Stderr = os.Stderr
+				cmd.Stdin = os.Stdin
 
-			_, err = io.Copy(os.Stdout, stdout)
-			if err != nil {
-				log.Println("Error copying output to Stdout", err.Error())
-			}
-
-			err = cmd.Wait()
-			if err != nil {
-				if !isInterrupt(err) {
-					log.Println("Error waiting for command:", err)
-					signalCh <- syscall.SIGINT
-					select {}
+				if err := cmd.Start(); err != nil {
+					return fmt.Errorf("error starting command: %w", err)
 
 				}
+				processesMutex.Lock()
+				processes = append(processes, cmd.Process)
+				processesMutex.Unlock()
+
+				if _, err = io.Copy(os.Stdout, stdout); err != nil && !errors.Is(err, io.EOF) {
+					return fmt.Errorf("error copying output to Stdout: %w", err)
+				}
+
+				if err := cmd.Wait(); err != nil && !isInterrupt(err) {
+					return fmt.Errorf("error waiting for command: %w", err)
+
+				}
+				return nil
+			}()
+			if err != nil {
+				log.Println("encountered an error -> exiting:", err)
+				signalCh <- syscall.SIGTERM
+				errFound.Store(true)
 			}
-		}()
+		}(arg)
+		wg.Wait()
 	}
-	wg.Wait()
+	if errFound.Load() {
+		for {
+			runtime.Gosched()
+		}
+	}
 }
 func isInterrupt(err error) bool {
 	var exitErr *exec.ExitError
