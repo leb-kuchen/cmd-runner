@@ -12,31 +12,40 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 func main() {
 	var (
 		wg             sync.WaitGroup
-		processes      []*os.Process
+		processes      []*exec.Cmd
 		processesMutex sync.Mutex
+		once           sync.Once
 	)
-	signalCh := make(chan os.Signal, 3)
+	signalCh := make(chan os.Signal, 2)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	// Cleanup goroutine
 	go func() {
 		<-signalCh
 		log.Println("Cleaning up...")
+		time.Sleep(time.Millisecond * 100)
 		processesMutex.Lock()
 		for _, proc := range processes {
-			log.Printf("terminating process: %v\n", proc.Pid)
-			err := proc.Signal(syscall.SIGTERM)
-			if err != nil {
-				log.Printf("Error terminating process: %v\n", err)
+			log.Printf("%v Exiting Command with process PID %d\n", proc, proc.Process.Pid)
+			if err := proc.Process.Signal(os.Interrupt); err != nil {
+				log.Printf("Error sending Interrupt signal to process: %v", err)
+			}
+
+			if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
+				log.Printf("Error sending SIGTERM signal to process: %v", err)
+			}
+
+			if err := proc.Process.Signal(syscall.SIGINT); err != nil {
+				log.Printf("Error sending SIGINT signal to process: %v", err)
 			}
 		}
 		processesMutex.Unlock()
-		wg.Wait()
 		os.Exit(0)
 	}()
 
@@ -59,33 +68,30 @@ func main() {
 					return fmt.Errorf("error starting command: %w", err)
 				}
 				processesMutex.Lock()
-				processes = append(processes, cmd.Process)
+				processes = append(processes, cmd)
 				processesMutex.Unlock()
 
 				if _, err := io.Copy(os.Stdout, stdout); err != nil && !errors.Is(err, io.EOF) {
 					return fmt.Errorf("error copying output to Stdout: %w", err)
 				}
 
-				if err := cmd.Wait(); err != nil && !isInterrupt(err) {
+				if err := cmd.Wait(); err != nil {
 					return fmt.Errorf("error waiting for command: %w", err)
 				}
 				return nil
 			}()
-			if err != nil {
-				log.Println("encountered an error -> exiting:", err)
+			once.Do(func() {
+				if err != nil {
+					log.Println("encountered an error -> exiting:", err)
+				} else {
+					log.Println("program terminated -> exiting")
+				}
 				signalCh <- syscall.SIGTERM
 				runtime.Gosched()
-			}
+
+			})
+
 		}(arg)
 	}
 	wg.Wait()
-}
-func isInterrupt(err error) bool {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-			return status.Signal() == os.Interrupt
-		}
-	}
-	return false
 }
