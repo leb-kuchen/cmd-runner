@@ -17,7 +17,8 @@ import (
 
 func main() {
 	var (
-		wg             sync.WaitGroup
+		wg, closeWg sync.WaitGroup
+
 		processes      []*exec.Cmd
 		processesMutex sync.Mutex
 		once           sync.Once
@@ -32,20 +33,27 @@ func main() {
 		time.Sleep(time.Millisecond * 100)
 		processesMutex.Lock()
 		for _, proc := range processes {
-			log.Printf("%v Exiting Command with process PID %d\n", proc, proc.Process.Pid)
-			if err := proc.Process.Signal(os.Interrupt); err != nil {
-				log.Printf("Error sending Interrupt signal to process: %v", err)
-			}
+			proc := proc
+			closeWg.Add(1)
+			go func(proc *exec.Cmd) {
+				defer wg.Done()
+				log.Printf("%v Exiting Command with process PID %d\n", proc, proc.Process.Pid)
+				if err := proc.Process.Signal(os.Interrupt); err != nil {
+					log.Printf("Error sending Interrupt signal to process: %v", err)
+				}
 
-			if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
-				log.Printf("Error sending SIGTERM signal to process: %v", err)
-			}
+				if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
+					log.Printf("Error sending SIGTERM signal to process: %v", err)
+				}
 
-			if err := proc.Process.Signal(syscall.SIGINT); err != nil {
-				log.Printf("Error sending SIGINT signal to process: %v", err)
-			}
+				if err := proc.Process.Signal(syscall.SIGINT); err != nil {
+					log.Printf("Error sending SIGINT signal to process: %v", err)
+				}
+			}(proc)
+
 		}
 		processesMutex.Unlock()
+		closeWg.Wait()
 		os.Exit(0)
 	}()
 
