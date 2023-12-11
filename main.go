@@ -36,7 +36,7 @@ func main() {
 			proc := proc
 			closeWg.Add(1)
 			go func(proc *exec.Cmd) {
-				defer wg.Done()
+				defer closeWg.Done()
 				log.Printf("%v Exiting Command with process PID %d\n", proc, proc.Process.Pid)
 				if err := proc.Process.Signal(os.Interrupt); err != nil {
 					log.Printf("Error sending Interrupt signal to process: %v", err)
